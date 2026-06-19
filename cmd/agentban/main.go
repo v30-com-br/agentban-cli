@@ -202,7 +202,6 @@ func run(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	provider := fs.String("provider", "codex", "codex ou claude")
 	name := fs.String("name", hostname(), "nome do agente")
-	verbose := fs.Bool("verbose", false, "exibe a saída completa do agente")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -224,7 +223,7 @@ func run(args []string) error {
 			return nil
 		}
 		fmt.Printf("[%s]\n", cl.Ticket.ID)
-		err = invoke(*provider, cl, *verbose)
+		err = invoke(*provider, cl)
 		if err == nil {
 			_, err = api.request(context.Background(), "POST", "/v1/agent/tickets/"+cl.Ticket.ID+"/complete", map[string]string{"comment": "Implementação concluída por " + *provider}, nil)
 		}
@@ -236,7 +235,7 @@ func run(args []string) error {
 		}
 	}
 }
-func invoke(provider string, cl claim, verbose bool) error {
+func invoke(provider string, cl claim) error {
 	exe, _ := os.Executable()
 	prompt := fmt.Sprintf(`Você está executando o ticket Agentban %s.
 
@@ -250,17 +249,12 @@ Ao terminar, apenas encerre normalmente. Não chame agentban complete: o Agentba
 	if provider == "codex" {
 		cmd = exec.Command("codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-C", ".", prompt)
 	} else {
-		cmd = exec.Command("claude", "-p", "--permission-mode", "bypassPermissions", prompt)
+		cmd = exec.Command("claude", "-p", "--verbose", "--permission-mode", "bypassPermissions", prompt)
 	}
 	cmd.Env = append(os.Environ(), "AGENTBAN_TICKET_ID="+cl.Ticket.ID)
 	// ponytail: sem stdin — codex/claude recebem o prompt por argumento; stdin aberto faz o codex travar em "Reading additional input from stdin..."
-	if provider != "codex" || verbose {
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-	} else {
-		cmd.Stdout = io.Discard
-		cmd.Stderr = io.Discard
-	}
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s encerrou com erro: %w", provider, err)
 	}
