@@ -321,7 +321,7 @@ Não conclua o ticket antes do commit estar publicado no upstream.`, cl.Ticket.I
 	if provider == "codex" {
 		cmd = exec.Command("codex", "exec", "-s", "workspace-write", "--skip-git-repo-check", "-C", ".", prompt)
 	} else {
-		cmd = exec.Command("claude", "-p", "--permission-mode", "acceptEdits", prompt)
+		cmd = exec.Command("claude", "-p", "--verbose", "--permission-mode", "acceptEdits", prompt)
 	}
 	cmd.Env = append(os.Environ(), "AGENTBAN_EXECUTION_ID="+cl.Execution.ID, "AGENTBAN_LEASE_TOKEN="+cl.LeaseToken)
 	cmd.Stdin = os.Stdin
