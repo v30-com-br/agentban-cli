@@ -324,7 +324,7 @@ Não conclua o ticket antes do commit estar publicado no upstream.`, cl.Ticket.I
 		cmd = exec.Command("claude", "-p", "--verbose", "--permission-mode", "acceptEdits", prompt)
 	}
 	cmd.Env = append(os.Environ(), "AGENTBAN_EXECUTION_ID="+cl.Execution.ID, "AGENTBAN_LEASE_TOKEN="+cl.LeaseToken)
-	cmd.Stdin = os.Stdin
+	// ponytail: sem stdin — codex/claude recebem o prompt por argumento; stdin aberto faz o codex travar em "Reading additional input from stdin..."
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
