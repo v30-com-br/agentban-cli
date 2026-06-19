@@ -3,17 +3,14 @@
 ## Instalação
 
 ```bash
-# baixa, compila e joga o binário no PATH (~/go/bin)
-gh repo clone v30-com-br/agentban-cli /tmp/agentban-cli
-go build -o "$(go env GOPATH)/bin/agentban" /tmp/agentban-cli/cmd/agentban
+go install github.com/v30-com-br/agentban-cli/cmd/agentban@latest
 
-# garante ~/go/bin no PATH (uma vez)
+# Se necessário, adicione os binários Go ao PATH:
 grep -q 'go/bin' ~/.zshrc || echo 'export PATH="$PATH:$(go env GOPATH)/bin"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
-> `go install github.com/...@latest` não funciona: o repo é privado e o `go.mod`
-> declara `github.com/v30/agentban-cli` (≠ caminho do repo `v30-com-br`). Use o build acima.
+Requisitos: Go instalado e ao menos um dos agentes disponível no `PATH`: [Codex CLI](https://github.com/openai/codex) ou [Claude Code](https://docs.anthropic.com/en/docs/claude-code).
 
 ## Uso
 
