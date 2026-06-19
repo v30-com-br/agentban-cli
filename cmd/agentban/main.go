@@ -335,7 +335,7 @@ Ao terminar, apenas encerre normalmente. O Agentban fará commit e push de alter
 	if provider == "codex" {
 		cmd = exec.Command("codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-C", ".", prompt)
 	} else {
-		cmd = exec.Command("claude", "-p", "--verbose", "--permission-mode", "bypassPermissions", prompt)
+		cmd = exec.Command("claude", "-p", "--permission-mode", "bypassPermissions", prompt)
 	}
 	cmd.Env = append(os.Environ(), "AGENTBAN_TICKET_ID="+cl.Ticket.ID)
 	// ponytail: sem stdin — codex/claude recebem o prompt por argumento; stdin aberto faz o codex travar em "Reading additional input from stdin..."
