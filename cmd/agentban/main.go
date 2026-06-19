@@ -319,7 +319,7 @@ Se não puder concluir, use:
 Não conclua o ticket antes do commit estar publicado no upstream.`, cl.Ticket.ID, cl.Ticket.Title, cl.Ticket.Content, exe, exe, exe)
 	var cmd *exec.Cmd
 	if provider == "codex" {
-		cmd = exec.Command("codex", "exec", "-s", "workspace-write", "-C", ".", prompt)
+		cmd = exec.Command("codex", "exec", "-s", "workspace-write", "--skip-git-repo-check", "-C", ".", prompt)
 	} else {
 		cmd = exec.Command("claude", "-p", "--permission-mode", "acceptEdits", prompt)
 	}
