@@ -198,48 +198,6 @@ func (c client) request(ctx context.Context, method, path string, input, output 
 	return res.StatusCode, nil
 }
 
-func git(args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
-	b, err := cmd.CombinedOutput()
-	if err != nil {
-		return "", fmt.Errorf("git %s: %s", strings.Join(args, " "), strings.TrimSpace(string(b)))
-	}
-	return strings.TrimSpace(string(b)), nil
-}
-func ensureClean() error {
-	s, err := git("status", "--porcelain")
-	if err != nil {
-		return err
-	}
-	if s != "" {
-		return errors.New("worktree possui alterações locais")
-	}
-	if _, err = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err != nil {
-		return errors.New("branch atual não possui upstream")
-	}
-	return nil
-}
-func pushedState() (sha, branch string, err error) {
-	if err = ensureClean(); err != nil {
-		return
-	}
-	sha, err = git("rev-parse", "HEAD")
-	if err != nil {
-		return
-	}
-	remote, er := git("rev-parse", "@{u}")
-	if er != nil {
-		err = er
-		return
-	}
-	if sha != remote {
-		err = errors.New("HEAD ainda não foi enviado ao upstream")
-		return
-	}
-	branch, err = git("branch", "--show-current")
-	return
-}
-
 func run(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	provider := fs.String("provider", "codex", "codex ou claude")
@@ -268,12 +226,7 @@ func run(args []string) error {
 		fmt.Printf("[%s]\n", cl.Ticket.ID)
 		err = invoke(*provider, cl, *verbose)
 		if err == nil {
-			sha, branch, stateErr := pushedState()
-			if stateErr != nil {
-				err = stateErr
-			} else {
-				_, err = api.request(context.Background(), "POST", "/v1/agent/tickets/"+cl.Ticket.ID+"/complete", map[string]string{"commitSHA": sha, "branch": branch, "comment": "Implementação concluída por " + *provider}, nil)
-			}
+			_, err = api.request(context.Background(), "POST", "/v1/agent/tickets/"+cl.Ticket.ID+"/complete", map[string]string{"comment": "Implementação concluída por " + *provider}, nil)
 		}
 		if err != nil {
 			if _, failErr := api.request(context.Background(), "POST", "/v1/agent/tickets/"+cl.Ticket.ID+"/fail", map[string]string{"error": err.Error()}, nil); failErr != nil {
@@ -346,15 +299,11 @@ func complete(args []string) error {
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	sha, branch, err := pushedState()
-	if err != nil {
-		return err
-	}
 	api, id, err := contextClient()
 	if err != nil {
 		return err
 	}
-	_, err = api.request(context.Background(), "POST", "/v1/agent/tickets/"+id+"/complete", map[string]string{"commitSHA": sha, "branch": branch, "comment": *msg}, nil)
+	_, err = api.request(context.Background(), "POST", "/v1/agent/tickets/"+id+"/complete", map[string]string{"comment": *msg}, nil)
 	return err
 }
 func failTicket(args []string) error {

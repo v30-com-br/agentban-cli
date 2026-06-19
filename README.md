@@ -21,7 +21,7 @@ agentban init --project UUID
 agentban run --provider codex
 ```
 
-`run` não exige git limpo nem upstream. Codex e Claude são iniciados sem limitação de ferramentas e são responsáveis por criar o commit e fazer `git push`. O CLI apenas verifica se o worktree está limpo e se o `HEAD` foi publicado antes de concluir o ticket e buscar o próximo. A saída do Codex fica silenciosa por padrão; use `--verbose` para acompanhar todos os detalhes.
+Codex e Claude são iniciados sem limitação de ferramentas e recebem a instrução de criar o commit e fazer `git push`. O CLI não executa nem valida operações Git: quando o agente encerra com sucesso, conclui o ticket e busca o próximo. A saída do Codex fica silenciosa por padrão; use `--verbose` para acompanhar todos os detalhes.
 
 Para conferir a versão instalada:
 
