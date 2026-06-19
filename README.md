@@ -21,4 +21,10 @@ agentban init --project UUID
 agentban run --provider codex
 ```
 
-`run` não exige git limpo nem upstream. Codex e Claude são iniciados sem limitação de ferramentas; ao final, o CLI cria um commit para alterações remanescentes, configura o upstream quando necessário, faz push e só então conclui o ticket.
+`run` não exige git limpo nem upstream. Codex e Claude são iniciados sem limitação de ferramentas; ao final, o CLI cria um commit para alterações remanescentes, configura o upstream quando necessário, faz push e só então conclui o ticket. A saída do Codex fica silenciosa por padrão; use `--verbose` para acompanhar todos os detalhes.
+
+Para conferir a versão instalada:
+
+```bash
+agentban version
+```

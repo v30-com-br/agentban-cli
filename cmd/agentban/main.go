@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -54,6 +55,9 @@ func main() {
 		err = complete(os.Args[2:])
 	case "fail":
 		err = failTicket(os.Args[2:])
+	case "version":
+		fmt.Println(buildVersion())
+		return
 	default:
 		usage()
 		os.Exit(2)
@@ -63,7 +67,15 @@ func main() {
 		os.Exit(1)
 	}
 }
-func usage() { fmt.Fprintln(os.Stderr, "uso: agentban <auth|init|run|comment|complete|fail>") }
+func usage() { fmt.Fprintln(os.Stderr, "uso: agentban <auth|init|run|comment|complete|fail|version>") }
+
+func buildVersion() string {
+	info, ok := debug.ReadBuildInfo()
+	if !ok || info.Main.Version == "" || info.Main.Version == "(devel)" {
+		return "dev"
+	}
+	return info.Main.Version
+}
 
 func configDir() (string, error) {
 	if d := os.Getenv("AGENTBAN_CONFIG_DIR"); d != "" {
@@ -173,6 +185,9 @@ func (c client) request(ctx context.Context, method, path string, input, output 
 	defer res.Body.Close()
 	if res.StatusCode >= 300 {
 		b, _ := io.ReadAll(io.LimitReader(res.Body, 4096))
+		if res.StatusCode == http.StatusNotFound && strings.TrimSpace(string(b)) == "404 page not found" {
+			return res.StatusCode, errors.New("API 404: rota incompatível; atualize com `go install github.com/v30-com-br/agentban-cli/cmd/agentban@latest`")
+		}
 		return res.StatusCode, fmt.Errorf("API %d: %s", res.StatusCode, strings.TrimSpace(string(b)))
 	}
 	if output != nil && res.StatusCode != 204 {
@@ -278,6 +293,7 @@ func run(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	provider := fs.String("provider", "codex", "codex ou claude")
 	name := fs.String("name", hostname(), "nome do agente")
+	verbose := fs.Bool("verbose", false, "exibe a saída completa do agente")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -299,7 +315,7 @@ func run(args []string) error {
 			return nil
 		}
 		fmt.Printf("[%s] %s\n", cl.Ticket.ID, cl.Ticket.Title)
-		err = invoke(*provider, cl)
+		err = invoke(*provider, cl, *verbose)
 		if err == nil {
 			err = publishChanges(cl.Ticket.ID)
 		}
@@ -319,7 +335,7 @@ func run(args []string) error {
 		}
 	}
 }
-func invoke(provider string, cl claim) error {
+func invoke(provider string, cl claim, verbose bool) error {
 	exe, _ := os.Executable()
 	prompt := fmt.Sprintf(`Você está executando o ticket Agentban %s.
 
@@ -339,9 +355,17 @@ Ao terminar, apenas encerre normalmente. O Agentban fará commit e push de alter
 	}
 	cmd.Env = append(os.Environ(), "AGENTBAN_TICKET_ID="+cl.Ticket.ID)
 	// ponytail: sem stdin — codex/claude recebem o prompt por argumento; stdin aberto faz o codex travar em "Reading additional input from stdin..."
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	if provider != "codex" || verbose {
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+	} else {
+		cmd.Stdout = io.Discard
+		cmd.Stderr = io.Discard
+	}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s encerrou com erro: %w", provider, err)
+	}
+	return nil
 }
 func contextClient() (client, string, error) {
 	api, _, err := loadClient()

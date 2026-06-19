@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"io"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,6 +27,21 @@ func TestLoadProject(t *testing.T) {
 		t.Fatalf("config inesperada: %#v", c)
 	}
 }
+
+func TestRequestExplainsIncompatibleRoute(t *testing.T) {
+	httpClient := &http.Client{Transport: roundTripFunc(func(_ *http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusNotFound, Body: io.NopCloser(strings.NewReader("404 page not found\n"))}, nil
+	})}
+	api := client{base: "https://api.example", token: "test", http: httpClient}
+	_, err := api.request(context.Background(), http.MethodPost, "/old-route", nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "go install github.com/v30-com-br/agentban-cli") {
+		t.Fatalf("erro sem orientação de atualização: %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return fn(request) }
 
 func TestPublishChangesCommitsAndPushes(t *testing.T) {
 	root := t.TempDir()
