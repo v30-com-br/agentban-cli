@@ -1,7 +1,7 @@
 # Agentban CLI
 
 ```bash
-go install github.com/v30/agentban-cli/cmd/agentban@latest
+go install github.com/v30-com-br/agentban-cli/cmd/agentban@latest
 agentban auth --token agban_...
 cd seu-repositorio
 agentban init --project UUID
