@@ -14,7 +14,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -28,15 +27,8 @@ type ticket struct {
 	ID, ProjectID, Title, Content, Status string
 	Position                              int64
 }
-type execution struct {
-	ID, TicketID, Provider, Status string
-	LeaseExpiresAt                 time.Time
-}
 type claim struct {
-	Ticket       ticket    `json:"ticket"`
-	Execution    execution `json:"execution"`
-	LeaseToken   string    `json:"leaseToken"`
-	LeaseSeconds int       `json:"leaseSeconds"`
+	Ticket ticket `json:"ticket"`
 }
 type client struct {
 	base, token string
@@ -157,7 +149,7 @@ func loadClient() (client, projectConfig, error) {
 	}
 	return client{base: strings.TrimRight(p.APIURL, "/"), token: cr.Token, http: &http.Client{Timeout: 30 * time.Second}}, p, nil
 }
-func (c client) request(ctx context.Context, method, path string, input, output any, lease string) (int, error) {
+func (c client) request(ctx context.Context, method, path string, input, output any) (int, error) {
 	var body io.Reader
 	if input != nil {
 		b, err := json.Marshal(input)
@@ -173,9 +165,6 @@ func (c client) request(ctx context.Context, method, path string, input, output 
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	if input != nil {
 		req.Header.Set("Content-Type", "application/json")
-	}
-	if lease != "" {
-		req.Header.Set("X-Agentban-Lease", lease)
 	}
 	res, err := c.http.Do(req)
 	if err != nil {
@@ -236,6 +225,55 @@ func pushedState() (sha, branch string, err error) {
 	return
 }
 
+func publishChanges(ticketID string) error {
+	status, err := git("status", "--porcelain")
+	if err != nil {
+		return err
+	}
+	if status != "" {
+		if _, err = git("add", "-A"); err != nil {
+			return err
+		}
+		shortID := ticketID
+		if len(shortID) > 8 {
+			shortID = shortID[:8]
+		}
+		if _, err = git("commit", "-m", "agentban: complete "+shortID); err != nil {
+			return err
+		}
+	}
+	branch, err := git("branch", "--show-current")
+	if err != nil || branch == "" {
+		return errors.New("não foi possível determinar a branch atual")
+	}
+	if _, err = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err == nil {
+		_, err = git("push")
+		return err
+	}
+	remotes, err := git("remote")
+	if err != nil {
+		return err
+	}
+	available := strings.Fields(remotes)
+	remote := "origin"
+	if len(available) == 1 {
+		remote = available[0]
+	} else if !contains(available, remote) {
+		return errors.New("branch sem upstream e remote origin ausente")
+	}
+	_, err = git("push", "-u", remote, branch)
+	return err
+}
+
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func run(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	provider := fs.String("provider", "codex", "codex ou claude")
@@ -252,7 +290,7 @@ func run(args []string) error {
 	}
 	for {
 		var cl claim
-		status, err := api.request(context.Background(), "POST", "/v1/agent/projects/"+p.ProjectID+"/tickets/claim", map[string]string{"provider": *provider, "agentName": *name}, &cl, "")
+		status, err := api.request(context.Background(), "POST", "/v1/agent/projects/"+p.ProjectID+"/tickets/claim", map[string]string{"provider": *provider, "agentName": *name}, &cl)
 		if err != nil {
 			return err
 		}
@@ -261,43 +299,23 @@ func run(args []string) error {
 			return nil
 		}
 		fmt.Printf("[%s] %s\n", cl.Ticket.ID, cl.Ticket.Title)
-		ctx, cancel := context.WithCancel(context.Background())
-		var wg sync.WaitGroup
-		wg.Add(1)
-		go func() { defer wg.Done(); heartbeat(ctx, api, cl) }()
 		err = invoke(*provider, cl)
-		cancel()
-		wg.Wait()
-		var current execution
-		_, getErr := api.request(context.Background(), "GET", "/v1/agent/executions/"+cl.Execution.ID, nil, &current, cl.LeaseToken)
-		if getErr != nil {
-			return getErr
+		if err == nil {
+			err = publishChanges(cl.Ticket.ID)
 		}
-		if current.Status == "running" {
-			reason := "Agente encerrou sem tramitar o ticket"
-			if err != nil {
-				reason = err.Error()
-			}
-			_, failErr := api.request(context.Background(), "POST", "/v1/agent/executions/"+cl.Execution.ID+"/fail", map[string]string{"error": reason}, nil, cl.LeaseToken)
-			if failErr != nil {
-				return failErr
+		if err == nil {
+			sha, branch, stateErr := pushedState()
+			if stateErr != nil {
+				err = stateErr
+			} else {
+				_, err = api.request(context.Background(), "POST", "/v1/agent/tickets/"+cl.Ticket.ID+"/complete", map[string]string{"commitSHA": sha, "branch": branch, "comment": "Implementação concluída por " + *provider}, nil)
 			}
 		}
-	}
-}
-func heartbeat(ctx context.Context, api client, cl claim) {
-	interval := time.Duration(cl.LeaseSeconds/3) * time.Second
-	if interval < 10*time.Second {
-		interval = 10 * time.Second
-	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			_, _ = api.request(ctx, "POST", "/v1/agent/executions/"+cl.Execution.ID, nil, nil, cl.LeaseToken)
+		if err != nil {
+			if _, failErr := api.request(context.Background(), "POST", "/v1/agent/tickets/"+cl.Ticket.ID+"/fail", map[string]string{"error": err.Error()}, nil); failErr != nil {
+				return fmt.Errorf("%v; falha ao atualizar ticket: %w", err, failErr)
+			}
+			return err
 		}
 	}
 }
@@ -310,36 +328,31 @@ Título: %s
 Conteúdo:
 %s
 
-Implemente completamente no repositório atual. Preserve a branch atual. Execute testes proporcionais à mudança, faça commit e git push. Durante o trabalho, use:
+Implemente completamente no repositório atual. Preserve a branch atual e execute testes proporcionais à mudança. Você pode usar todas as ferramentas e funcionalidades disponíveis. Durante o trabalho, use:
   %s comment --body "mensagem"
-Ao concluir, depois do push confirmado, use:
-  %s complete --comment "resumo"
-Se não puder concluir, use:
-  %s fail --error "motivo"
-Não conclua o ticket antes do commit estar publicado no upstream.`, cl.Ticket.ID, cl.Ticket.Title, cl.Ticket.Content, exe, exe, exe)
+Ao terminar, apenas encerre normalmente. O Agentban fará commit e push de alterações remanescentes e só então concluirá o ticket.`, cl.Ticket.ID, cl.Ticket.Title, cl.Ticket.Content, exe)
 	var cmd *exec.Cmd
 	if provider == "codex" {
-		cmd = exec.Command("codex", "exec", "-s", "workspace-write", "--skip-git-repo-check", "-C", ".", prompt)
+		cmd = exec.Command("codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-C", ".", prompt)
 	} else {
-		cmd = exec.Command("claude", "-p", "--verbose", "--permission-mode", "acceptEdits", prompt)
+		cmd = exec.Command("claude", "-p", "--verbose", "--permission-mode", "bypassPermissions", prompt)
 	}
-	cmd.Env = append(os.Environ(), "AGENTBAN_EXECUTION_ID="+cl.Execution.ID, "AGENTBAN_LEASE_TOKEN="+cl.LeaseToken)
+	cmd.Env = append(os.Environ(), "AGENTBAN_TICKET_ID="+cl.Ticket.ID)
 	// ponytail: sem stdin — codex/claude recebem o prompt por argumento; stdin aberto faz o codex travar em "Reading additional input from stdin..."
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
-func contextClient() (client, string, string, error) {
+func contextClient() (client, string, error) {
 	api, _, err := loadClient()
 	if err != nil {
-		return api, "", "", err
+		return api, "", err
 	}
-	id := os.Getenv("AGENTBAN_EXECUTION_ID")
-	lease := os.Getenv("AGENTBAN_LEASE_TOKEN")
-	if id == "" || lease == "" {
-		return api, "", "", errors.New("comando disponível apenas dentro de agentban run")
+	id := os.Getenv("AGENTBAN_TICKET_ID")
+	if id == "" {
+		return api, "", errors.New("comando disponível apenas dentro de agentban run")
 	}
-	return api, id, lease, nil
+	return api, id, nil
 }
 func comment(args []string) error {
 	fs := flag.NewFlagSet("comment", flag.ContinueOnError)
@@ -350,11 +363,11 @@ func comment(args []string) error {
 	if strings.TrimSpace(*body) == "" {
 		return errors.New("use --body")
 	}
-	api, id, lease, err := contextClient()
+	api, id, err := contextClient()
 	if err != nil {
 		return err
 	}
-	_, err = api.request(context.Background(), "POST", "/v1/agent/executions/"+id+"/comments", map[string]string{"body": *body}, nil, lease)
+	_, err = api.request(context.Background(), "POST", "/v1/agent/tickets/"+id+"/comments", map[string]string{"body": *body}, nil)
 	return err
 }
 func complete(args []string) error {
@@ -367,11 +380,11 @@ func complete(args []string) error {
 	if err != nil {
 		return err
 	}
-	api, id, lease, err := contextClient()
+	api, id, err := contextClient()
 	if err != nil {
 		return err
 	}
-	_, err = api.request(context.Background(), "POST", "/v1/agent/executions/"+id+"/complete", map[string]string{"commitSHA": sha, "branch": branch, "comment": *msg}, nil, lease)
+	_, err = api.request(context.Background(), "POST", "/v1/agent/tickets/"+id+"/complete", map[string]string{"commitSHA": sha, "branch": branch, "comment": *msg}, nil)
 	return err
 }
 func failTicket(args []string) error {
@@ -384,11 +397,11 @@ func failTicket(args []string) error {
 	if strings.TrimSpace(*reason) == "" {
 		return errors.New("use --error")
 	}
-	api, id, lease, err := contextClient()
+	api, id, err := contextClient()
 	if err != nil {
 		return err
 	}
-	_, err = api.request(context.Background(), "POST", "/v1/agent/executions/"+id+"/fail", map[string]string{"error": *reason, "comment": *comment}, nil, lease)
+	_, err = api.request(context.Background(), "POST", "/v1/agent/tickets/"+id+"/fail", map[string]string{"error": *reason, "comment": *comment}, nil)
 	return err
 }
 func hostname() string {
