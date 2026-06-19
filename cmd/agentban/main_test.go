@@ -43,16 +43,18 @@ type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (fn roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) { return fn(request) }
 
-func TestPublishChangesCommitsAndPushes(t *testing.T) {
-	root := t.TempDir()
-	remote := filepath.Join(root, "remote.git")
-	repo := filepath.Join(root, "repo")
-	runGit(t, root, "init", "--bare", remote)
-	runGit(t, root, "init", "-b", "main", repo)
+func TestPushedStateDoesNotCommitAgentChanges(t *testing.T) {
+	repo := filepath.Join(t.TempDir(), "repo")
+	runGit(t, "", "init", "-b", "main", repo)
 	runGit(t, repo, "config", "user.name", "Agentban Test")
 	runGit(t, repo, "config", "user.email", "agentban@example.com")
-	runGit(t, repo, "remote", "add", "origin", remote)
-	if err := os.WriteFile(filepath.Join(repo, "change.txt"), []byte("done\n"), 0600); err != nil {
+	file := filepath.Join(repo, "change.txt")
+	if err := os.WriteFile(file, []byte("original\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", "change.txt")
+	runGit(t, repo, "commit", "-m", "initial")
+	if err := os.WriteFile(file, []byte("alterado pelo agente\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	old, _ := os.Getwd()
@@ -60,21 +62,20 @@ func TestPublishChangesCommitsAndPushes(t *testing.T) {
 	if err := os.Chdir(repo); err != nil {
 		t.Fatal(err)
 	}
-	if err := publishChanges("12345678-abcd"); err != nil {
-		t.Fatal(err)
+	if _, _, err := pushedState(); err == nil || !strings.Contains(err.Error(), "alterações locais") {
+		t.Fatalf("esperava rejeitar worktree sujo: %v", err)
 	}
-	if _, _, err := pushedState(); err != nil {
-		t.Fatal(err)
-	}
-	if got := runGit(t, repo, "log", "-1", "--pretty=%s"); got != "agentban: complete 12345678" {
-		t.Fatalf("mensagem de commit inesperada: %q", got)
+	if count := runGit(t, repo, "rev-list", "--count", "HEAD"); count != "1" {
+		t.Fatalf("o CLI criou commit indevidamente: %s", count)
 	}
 }
 
 func runGit(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", args...)
-	cmd.Dir = dir
+	if dir != "" {
+		cmd.Dir = dir
+	}
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("git %v: %v: %s", args, err, out)

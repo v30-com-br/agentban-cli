@@ -25,8 +25,8 @@ type credentials struct {
 	Token string `json:"token"`
 }
 type ticket struct {
-	ID, ProjectID, Title, Content, Status string
-	Position                              int64
+	ID, ProjectID, Content, Status string
+	Position                       int64
 }
 type claim struct {
 	Ticket ticket `json:"ticket"`
@@ -240,55 +240,6 @@ func pushedState() (sha, branch string, err error) {
 	return
 }
 
-func publishChanges(ticketID string) error {
-	status, err := git("status", "--porcelain")
-	if err != nil {
-		return err
-	}
-	if status != "" {
-		if _, err = git("add", "-A"); err != nil {
-			return err
-		}
-		shortID := ticketID
-		if len(shortID) > 8 {
-			shortID = shortID[:8]
-		}
-		if _, err = git("commit", "-m", "agentban: complete "+shortID); err != nil {
-			return err
-		}
-	}
-	branch, err := git("branch", "--show-current")
-	if err != nil || branch == "" {
-		return errors.New("não foi possível determinar a branch atual")
-	}
-	if _, err = git("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"); err == nil {
-		_, err = git("push")
-		return err
-	}
-	remotes, err := git("remote")
-	if err != nil {
-		return err
-	}
-	available := strings.Fields(remotes)
-	remote := "origin"
-	if len(available) == 1 {
-		remote = available[0]
-	} else if !contains(available, remote) {
-		return errors.New("branch sem upstream e remote origin ausente")
-	}
-	_, err = git("push", "-u", remote, branch)
-	return err
-}
-
-func contains(values []string, target string) bool {
-	for _, value := range values {
-		if value == target {
-			return true
-		}
-	}
-	return false
-}
-
 func run(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	provider := fs.String("provider", "codex", "codex ou claude")
@@ -314,11 +265,8 @@ func run(args []string) error {
 			fmt.Println("Fila vazia.")
 			return nil
 		}
-		fmt.Printf("[%s] %s\n", cl.Ticket.ID, cl.Ticket.Title)
+		fmt.Printf("[%s]\n", cl.Ticket.ID)
 		err = invoke(*provider, cl, *verbose)
-		if err == nil {
-			err = publishChanges(cl.Ticket.ID)
-		}
 		if err == nil {
 			sha, branch, stateErr := pushedState()
 			if stateErr != nil {
@@ -339,14 +287,12 @@ func invoke(provider string, cl claim, verbose bool) error {
 	exe, _ := os.Executable()
 	prompt := fmt.Sprintf(`Você está executando o ticket Agentban %s.
 
-Título: %s
-
-Conteúdo:
+Corpo:
 %s
 
-Implemente completamente no repositório atual. Preserve a branch atual e execute testes proporcionais à mudança. Você pode usar todas as ferramentas e funcionalidades disponíveis. Durante o trabalho, use:
+Implemente completamente no repositório atual. Preserve a branch atual, execute testes proporcionais à mudança, faça commit e git push. Você pode usar todas as ferramentas e funcionalidades disponíveis. Durante o trabalho, use:
   %s comment --body "mensagem"
-Ao terminar, apenas encerre normalmente. O Agentban fará commit e push de alterações remanescentes e só então concluirá o ticket.`, cl.Ticket.ID, cl.Ticket.Title, cl.Ticket.Content, exe)
+Ao terminar, apenas encerre normalmente. Não chame agentban complete: o Agentban verificará se seu commit foi publicado e concluirá o ticket automaticamente.`, cl.Ticket.ID, cl.Ticket.Content, exe)
 	var cmd *exec.Cmd
 	if provider == "codex" {
 		cmd = exec.Command("codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-C", ".", prompt)
