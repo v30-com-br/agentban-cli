@@ -246,9 +246,6 @@ func run(args []string) error {
 	if *provider != "codex" && *provider != "claude" {
 		return errors.New("provider deve ser codex ou claude")
 	}
-	if err := ensureClean(); err != nil {
-		return err
-	}
 	api, p, err := loadClient()
 	if err != nil {
 		return err
@@ -285,9 +282,6 @@ func run(args []string) error {
 			if failErr != nil {
 				return failErr
 			}
-		}
-		if cleanErr := ensureClean(); cleanErr != nil {
-			return fmt.Errorf("ticket terminou deixando o repositório inseguro para continuar: %w", cleanErr)
 		}
 	}
 }
