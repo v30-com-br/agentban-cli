@@ -1,6 +1,7 @@
 name: Release
 on:
-  push: { tags: ['v*'] }
+  push: { branches: [main] }
+  workflow_dispatch:
 permissions: { contents: write }
 jobs:
   release:
@@ -16,5 +17,11 @@ jobs:
           GOOS=linux GOARCH=arm64 go build -trimpath -o dist/agentban-linux-arm64 ./cmd/agentban
           GOOS=darwin GOARCH=amd64 go build -trimpath -o dist/agentban-darwin-amd64 ./cmd/agentban
           GOOS=darwin GOARCH=arm64 go build -trimpath -o dist/agentban-darwin-arm64 ./cmd/agentban
+      # ponytail: release "rolling" na tag `latest`; binarios re-enviados a cada push.
+      # Se quiser uma release versionada por commit, troque tag_name por ${{ github.sha }}.
       - uses: softprops/action-gh-release@v2
-        with: { files: 'dist/*' }
+        with:
+          tag_name: latest
+          name: latest
+          files: 'dist/*'
+          make_latest: true
