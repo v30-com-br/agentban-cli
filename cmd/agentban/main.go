@@ -247,7 +247,7 @@ Implemente completamente no repositório atual. Preserve a branch atual, execute
 Ao terminar, apenas encerre normalmente. Não chame agentban complete: o Agentban verificará se seu commit foi publicado e concluirá o ticket automaticamente.`, cl.Ticket.ID, cl.Ticket.Content, exe)
 	var cmd *exec.Cmd
 	if provider == "codex" {
-		cmd = exec.Command("codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-C", ".", prompt)
+		cmd = exec.Command("codex", "exec", "--dangerously-bypass-approvals-and-sandbox", "--skip-git-repo-check", "-c", "model_reasoning_summary=detailed", "-c", "model_verbosity=high", "-C", ".", prompt)
 	} else {
 		cmd = exec.Command("claude", "-p", "--verbose", "--permission-mode", "bypassPermissions", prompt)
 	}
